@@ -13,3 +13,8 @@ const handleKeyPress = ref => {
 module.exports = {
 	handleKeyPress,
 };
+
+const k = [];
+handleKeyPress(k);
+
+while(true) console.log(k[0]);
