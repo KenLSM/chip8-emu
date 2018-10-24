@@ -91,7 +91,7 @@ try {
 			case '3': {
 					const vIdx = parseInt(inst[1], 16);
 					const kk = parseInt(inst.slice(2, 4), 16);
-					console.log(81726387123, vIdx, V, V[0], kk);
+					console.log('\nBranch command. V:', vIdx, V, '\nTest if', V[0], '===', kk);
 					// throw new Error();
 					if (V[vIdx] === kk) {
 						// throw new Error();
