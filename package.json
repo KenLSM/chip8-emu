@@ -4,11 +4,13 @@
   "description": "",
   "main": "index.js",
   "dependencies": {
+    "js-beautify": "^1.8.8",
     "nodemon": "^1.18.4"
   },
   "devDependencies": {},
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
+    "pretty": "js-beautify index.js -r",
     "watch": "nodemon index.js"
   },
   "author": "",
