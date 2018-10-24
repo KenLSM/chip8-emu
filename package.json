@@ -10,7 +10,7 @@
   "devDependencies": {},
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "pretty": "js-beautify index.js -r --indent-size 2",
+    "pretty": "js-beautify src/* -r --indent-size 2",
     "watch": "nodemon index.js"
   },
   "author": "",
