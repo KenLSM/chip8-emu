@@ -1,103 +1,88 @@
 // BYTE SIZE = 8
 // 0000 0000 = 1-byte
-
-const sleep = i => {
-  for (let i = 0; i < i * 100000000; i++) {
-    let c = i;
-    c += c + i
-  };
-}
+const CONSTANTS = require('./constants');
+const fs = require('fs');
 const RomUtils = require('./romUtils');
 const DrawUtils = require('./drawUtils');
-const KeyUtils = require('./keypressutils');
-const getRandomInt = max => {
-  return Math.floor(Math.random() * Math.floor(max));
-}
+const KeyUtils = require('./keypressUtils');
+const SystemUtils = require('./systemUtils');
 
-const fs = require('fs');
+const getRandomInt = max => Math.floor(Math.random() * Math.floor(max));
 
-const DEBUG = !true;
 
 const fd = fs.openSync('tetris.rom', 'r');
 
+SystemUtils.initState();
 
-/* Emulator states */
-let programCounter = 512; // 0x200
-let I = 0; // ??
-let V = Array(16).fill(0); // special counter
-let VF = 0; // visual flag?
-let DT = 0;
-let ST = 0;
-// second element status for should continue running game loop
-let keyPressed = [null, true];
+// Emulator state
+let state = SystemUtils.initState();
+
+// [KeyPressed, ShouldContinueRunning]
+const keyPressed = [null, true];
 
 /* Emulator inits */
 KeyUtils.handleKeyPress(keyPressed);
-let canvas = DrawUtils.init();
+const canvas = DrawUtils.init();
 DrawUtils.draw(canvas);
 const rawRom = fs.readFileSync(fd);
 const romData = RomUtils.fillRomWithSpirtes(
   RomUtils.padRom(
     RomUtils.parseRom(rawRom),
-    programCounter
-  )
+    state.programCounter,
+  ),
 );
 
 /* Emulator rom health check */
 RomUtils.printRom(romData, 0);
-
-let programStack = [];
-
-const log = (...args) => DEBUG ? console.log(...args) : null;
-const error = (...args) => DEBUG ? console.error(...args) : null;
+process.exit();
+const log = (...args) => (CONSTANTS.DEBUG ? console.log(...args) : null);
+const error = (...args) => (console.error(...args));
 
 const loop = () => {
-  const instH = romData[programCounter];
-  const instL = romData[programCounter + 1];
+  const instH = romData[state.programCounter];
+  const instL = romData[state.programCounter + 1];
   const inst = instH.concat(instL);
 
-  log('ProgramCounter:', programCounter);
-  log('Reading:', inst);
-  log('K', inst[0])
+  log('Instruction:', inst);
 
   switch (inst[0]) {
     case 'a':
-      {
-        I = parseInt(inst.slice(1), 16);
-      }
-      programCounter += 2;
+      state.I = parseInt(inst.slice(1), 16);
+      state.programCounter += 2;
+      log('SET: I', parseInt(inst.slice(1), 16));
       break;
     case 'c':
       {
         const vIdx = parseInt(inst[1], 16);
         const kk = parseInt(inst.slice(2, 4), 16);
-        const rand = getRandomInt();
-        V[vIdx] = rand & kk;
+        const rand = getRandomInt(255);
+        console.log('RAND', rand);
+        state.V[vIdx] = rand & kk;
       }
-      programCounter += 2;
+      state.programCounter += 2;
       break;
     case 'd':
       { // Drawing command
-        // throw new Error();
-        const vX = parseInt(inst[1], 16);
-        const vY = parseInt(inst[2], 16);
+        const vX = state.V[parseInt(inst[1], 16)];
+        const vY = state.V[parseInt(inst[2], 16)];
+        state.V[0xF] = 0; // Reset VF to 0
         const n = parseInt(inst[3], 16); // read for n-bytes starting from register I
         for (let i = 0; i < n; i++) {
-          // I = I + i;
-          const sevenPixelInfo = parseInt(romData[I + i]).toString(2);
-          // console.log(sevenPixelInfo);
-          for (let ii = 0; ii < 7; ii++) {
-            const x = (vX + i) & 32;
-            const y = (vY + ii) & 64;
-            const newPixel = canvas[x][y];
+          const sevenPixelInfo = parseInt(romData[state.I + i], 16).toString(2);
+          for (let ii = 0; ii < 8; ii += 1) {
+            const x = (vX + ii) & 0x3F;
+            const y = (vY + i) & 0x1F;
+            const newPixel = canvas[y][x];
 
-            canvas[x][y] = (newPixel !== sevenPixelInfo[ii]);
+            if (newPixel && sevenPixelInfo[ii]) { state.V[0xF] = 1; }
+            canvas[y][x] = (newPixel !== sevenPixelInfo[ii]);
           }
+          console.log('7 Pixel', sevenPixelInfo);
         }
         DrawUtils.draw(canvas);
-        // console.log(canvas);
+        log('DRAW DATA:', vX, vY, n);
       }
-      programCounter += 2;
+      state.programCounter += 2;
       break;
     case 'e':
       { // key is pressed
@@ -105,28 +90,23 @@ const loop = () => {
         const LL = inst.slice(2, 4);
         switch (LL) {
           case '9e':
-            {
-              if (V[vIdx] === keyPressed[0]) {
-                programCounter += 2;
-              }
+            if (state.V[vIdx] === keyPressed[0]) {
+              state.programCounter += 2;
             }
+            log('Keypress check', state.V[vIdx], '===', keyPressed[0]);
             break;
           case 'a1':
-            {
-              if (V[vIdx] !== keyPressed[0]) {
-                programCounter += 2;
-              }
+            if (state.V[vIdx] !== keyPressed[0]) {
+              state.programCounter += 2;
             }
+            log('Keypress check', state.V[vIdx], '!==', keyPressed[0]);
             break;
           default:
-            {
-              console.error('\n\nUnhandled instruction on e inst', inst, LL);
-              throw new Error();
-            }
+            error('\n\nUnhandled instruction on e inst', inst, LL);
+            throw new Error();
         }
-
       }
-      programCounter += 2;
+      state.programCounter += 2;
       break;
     case 'f':
       {
@@ -135,119 +115,149 @@ const loop = () => {
           case '1e':
             {
               const vIdx = parseInt(inst[1], 16);
-              I += (I + V[vIdx]) & 0xFF;
+              state.I = (state.I + state.V[vIdx]) & 0xFFF;
+              log('Accum: I += V[vIdx]', state.I, state.V[vIdx], vIdx);
             }
             break;
           case '15':
             {
               const vIdx = parseInt(inst[1], 16);
-              DT = V[vIdx] & 0xFF;
+              state.DT = state.V[vIdx] & 0xFF;
+              log('SET: DT = V[vIdx]', state.I, state.V[vIdx], vIdx);
             }
             break;
           case '07':
             {
               const vIdx = parseInt(inst[1], 16);
-              V[vIdx] = DT & 0xFF;
+              state.V[vIdx] = state.DT & 0xFF;
+              log('SET: V[vIdx] = DT', state.V[vIdx], vIdx, state.DT);
+            }
+            break;
+          case '55': // MEM DUMP
+            {
+              const vEnd = parseInt(inst[1], 16);
+              for (let i = 0; i < vEnd; i++) {
+                state.V[i] = parseInt(romData[state.I + i], 16);
+              }
+              log('MEM DUMP FROM: V0... = I...', state.V, romData.slice(state.I, vEnd));
+              throw new Error();
             }
             break;
           default:
-            {
-              console.error('\n\nUnhandled instruction on f inst', inst, LL);
-              throw new Error();
-            }
-
+            error('\n\nUnhandled instruction on f inst', inst, LL);
+            throw new Error();
         }
       }
-      programCounter += 2;
+      state.programCounter += 2;
       break;
     case '0':
-      {
-        if (inst === '00ee') {
-          programCounter = programStack.pop();
-          programCounter += 2;
-          break;
-        }
-        error('\n\n Unhandled sub-instruction', inst);
+      if (inst === '00ee') { // RETURN
+        state = SystemUtils.popState(state);
+        state.programCounter += 2;
+        log('RETN FUNC');
+        break;
       }
+      error('\n\n Unhandled sub-instruction', inst);
       throw new Error();
-    case '1':
-      {
-        programCounter = parseInt(inst.slice(1), 16);
-      }
+    case '1': // JUMP
+      state.programCounter = parseInt(inst.slice(1), 16);
+      log('JUMP', state.programCounter);
       break;
-    case '2':
-      {
-        programStack.push(programCounter);
-        programCounter = parseInt(inst.slice(1), 16);
-        log('Move to', parseInt(inst.slice(1), 16));
-      }
+    case '2': // CALL
+      state = SystemUtils.pushState(state);
+      state.programCounter = parseInt(inst.slice(1), 16);
+      log('CALL FUNC', parseInt(inst.slice(1), 16));
       break;
     case '3':
       {
         const vIdx = parseInt(inst[1], 16);
         const kk = parseInt(inst.slice(2, 4), 16);
-        log('\nBE command. V:', vIdx, V, '\nTest if', V[vIdx], '===', kk);
-        if (V[vIdx] === kk) {
-          programCounter += 2; // skip next
+        log('\nBE command. V:', vIdx, state.V, '\nTest if', state.V[vIdx], '===', kk);
+        if (state.V[vIdx] === kk) {
+          state.programCounter += 2; // skip next
         }
-        programCounter += 2;
-        debugger;
+        state.programCounter += 2;
       }
       break;
     case '4':
       {
         const vIdx = parseInt(inst[1], 16);
         const kk = parseInt(inst.slice(2, 4), 16);
-        log('\nBNE command. V:', vIdx, V, '\nTest if', V[vIdx], '!==', kk);
-        if (V[vIdx] !== kk) {
-          programCounter += 2; // skip next
+        log('\nBNE command. V:', vIdx, state.V, '\nTest if', state.V[vIdx], '!==', kk);
+        if (state.V[vIdx] !== kk) {
+          state.programCounter += 2; // skip next
         }
-        programCounter += 2;
-        debugger;
+        state.programCounter += 2;
       }
       break;
     case '6':
       {
         const vIdx = parseInt(inst[1], 16);
-        V[vIdx] = parseInt(inst.slice(2, 4), 16);
+        state.V[vIdx] = parseInt(inst.slice(2, 4), 16);
         log('Set V', vIdx, 'to', parseInt(inst.slice(2, 4), 16));
-        programCounter += 2;
+        state.programCounter += 2;
       }
       break;
     case '7':
       {
         const vIdx = parseInt(inst[1], 16);
-        V[vIdx] += parseInt(inst.slice(2, 4), 16);
-        V[vIdx] = V[vIdx] & 0xFF;
+        state.V[vIdx] = (state.V[vIdx] + parseInt(inst.slice(2, 4), 16)) & 0xFF;
         log('Add V', vIdx, 'by', parseInt(inst.slice(2, 4), 16));
-        programCounter += 2;
+        state.programCounter += 2;
+      }
+      break;
+    case '8':
+      {
+        const L = inst[3];
+        switch (L) {
+          case '0':
+            {
+              const Vx = parseInt(inst[1], 16);
+              const Vy = parseInt(inst[2], 16);
+              state.V[Vx] = state.V[Vy];
+              log('SET Vx = Vy', Vx, Vy, state.V[parseInt(inst[1], 16)], 'to ', state.V[parseInt(inst[2], 16)]);
+              state.programCounter += 2;
+            }
+            break;
+          default:
+            error('\n\nUnhandled instruction on 8 inst', inst, L);
+            throw new Error();
+        }
       }
       break;
 
     default:
-      console.error('\n\nUnhandled instruction on first byte array', inst);
+      error('\n\nUnhandled instruction on first byte array', inst);
       throw new Error();
   }
-  DT -= DT > 0 ? 1 : 0;
-  ST -= ST > 0 ? 1 : 0;
+  state.DT -= state.DT > 0 ? 1 : 0;
+  state.ST -= state.ST > 0 ? 1 : 0;
 };
 
-let now = new Date().getTime();
 let delay = 1;
+
+const stepper = async () => {
+  while (!keyPressed[0]) {
+    await new Promise(p => setTimeout(p, 100));
+  }
+  keyPressed[0] = null;
+  log('State', state);
+};
 
 const main = async () => {
   while (keyPressed[1]) {
     const start = new Date().getTime();
-    // console.log(start);
-    await new Promise(p => setTimeout(p, delay));
-    loop();
-    // console.log((new Date().getTime() - start));
-    delay = 0 ;// 10 - (new Date().getTime() - start)
+    await new Promise(p => setTimeout(p, delay)); // eslint-disable-line
+    try {
+      loop();
+    } catch (e) {
+      error('\n\nCrashed', '\nPC', state.programCounter, '\nI', state.I, '\nV', ...state.V, '\n\n');
+      throw e;
+    }
+    // await stepper();
+    // log((new Date().getTime() - start));
+    delay = 16 - (new Date().getTime() - start); // 60 fps
   }
-}
-main();
-
-// } catch (e) {
-//   log('\n\nCrashed', '\nPC', programCounter, '\nI', I, '\nV', ...V, '\n\n');
-//   throw e;
-// }
+  log('\n\nHalted:', state);
+};
+main().catch(error).finally(() => process.exit());

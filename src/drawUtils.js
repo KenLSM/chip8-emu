@@ -1,4 +1,5 @@
-const onPixel = '@';
+const CONSTANTS = require('./constants');
+const onPixel = '█';
 const offPixel = ' ';
 
 const init = canvas => {
@@ -10,7 +11,7 @@ const init = canvas => {
 };
 
 const draw = canvas => {
-  console.log('\033[2J');
+  if (!CONSTANTS.DEBUG) console.log('\033[2J');
   for (let r = 0; r < canvas.length; r++) {
     console.log(String(r).padStart(4),
       canvas[r].reduce(
