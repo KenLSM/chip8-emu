@@ -34,11 +34,11 @@ const romData = RomUtils.fillRomWithSpirtes(
 
 /* Emulator rom health check */
 RomUtils.printRom(romData, 0);
-process.exit();
+
 const log = (...args) => (CONSTANTS.DEBUG ? console.log(...args) : null);
 const error = (...args) => (console.error(...args));
 
-const loop = () => {
+const loop = async () => {
   const instH = romData[state.programCounter];
   const instL = romData[state.programCounter + 1];
   const inst = instH.concat(instL);
@@ -75,12 +75,13 @@ const loop = () => {
             const newPixel = canvas[y][x];
 
             if (newPixel && sevenPixelInfo[ii]) { state.V[0xF] = 1; }
-            canvas[y][x] = (newPixel !== sevenPixelInfo[ii]);
+            canvas[y][x] = (newPixel != sevenPixelInfo[ii]);
           }
-          console.log('7 Pixel', sevenPixelInfo);
+          console.log('7 Pixel', sevenPixelInfo, parseInt(romData[state.I + i], 16), romData[state.I + i]);
         }
         DrawUtils.draw(canvas);
-        log('DRAW DATA:', vX, vY, n);
+        log('DRAW DATA: (Vx, Vy, n)', vX, vY, n);
+        // await stepper();
       }
       state.programCounter += 2;
       break;
@@ -112,6 +113,13 @@ const loop = () => {
       {
         const LL = inst.slice(2, 4);
         switch (LL) {
+          case '07':
+            {
+              const vIdx = parseInt(inst[1], 16);
+              state.V[vIdx] = state.DT & 0xFF;
+              log('SET: V[vIdx] = DT', state.V[vIdx], vIdx, state.DT);
+            }
+            break;
           case '1e':
             {
               const vIdx = parseInt(inst[1], 16);
@@ -126,21 +134,26 @@ const loop = () => {
               log('SET: DT = V[vIdx]', state.I, state.V[vIdx], vIdx);
             }
             break;
-          case '07':
+          case '33':
             {
               const vIdx = parseInt(inst[1], 16);
-              state.V[vIdx] = state.DT & 0xFF;
-              log('SET: V[vIdx] = DT', state.V[vIdx], vIdx, state.DT);
+              const BCD = state.V[vIdx];
+              const D = BCD % 10;
+              const C = BCD % 100 / 10 | 0; // eslint-disable-line
+              const B = BCD % 1000 / 100 | 0; // eslint-disable-line
+              romData[state.I] = B;
+              romData[state.I + 1] = C;
+              romData[state.I + 2] = D;
             }
             break;
+
           case '55': // MEM DUMP
             {
               const vEnd = parseInt(inst[1], 16);
               for (let i = 0; i < vEnd; i++) {
-                state.V[i] = parseInt(romData[state.I + i], 16);
+                romData[state.I + i] = state.V[i];
               }
-              log('MEM DUMP FROM: V0... = I...', state.V, romData.slice(state.I, vEnd));
-              throw new Error();
+              log('MEM DUMP TO: I', state.V, romData.slice(state.I, vEnd));
             }
             break;
           default:
@@ -248,16 +261,20 @@ const main = async () => {
   while (keyPressed[1]) {
     const start = new Date().getTime();
     await new Promise(p => setTimeout(p, delay)); // eslint-disable-line
-    try {
-      loop();
-    } catch (e) {
-      error('\n\nCrashed', '\nPC', state.programCounter, '\nI', state.I, '\nV', ...state.V, '\n\n');
-      throw e;
-    }
+    await loop();
     // await stepper();
     // log((new Date().getTime() - start));
     delay = 16 - (new Date().getTime() - start); // 60 fps
   }
   log('\n\nHalted:', state);
 };
-main().catch(error).finally(() => process.exit());
+main()
+  .catch(e => {
+    error('### Crashed ##');
+    error('\n\nSTATE DUMP', '\nPC', state.programCounter, '\nI', state.I, '\nV', ...state.V, '\n\n');
+    error(e);
+  })
+  .finally(() => {
+    console.log('Ended');
+    process.exit();
+  });
