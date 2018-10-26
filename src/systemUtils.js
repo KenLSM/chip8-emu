@@ -5,10 +5,10 @@ const defaultState = {
   V: Array(16).fill(0), // 16 V-Registers
   DT: 0, // Delay Timer, counts down to 0
   ST: 0, // Sound Timer, counts down to 0
-  // programStack: [],
+  stack: [],
 };
 
-const states = [];
+// const states = [];
 const initState = () => {
   const r = Object.assign({}, defaultState);
   r.V = new Array(16).fill(0);
@@ -16,17 +16,15 @@ const initState = () => {
 };
 
 const pushState = state => {
-  // states.push(state);
-  states.push(state.programCounter);
+  state.stack.push(state.programCounter);
   state.programCounter = 0;
   return state;
-  // return initState();
 };
 
 const popState = state => {
-  state.programCounter = states.pop();
+  state.programCounter = state.stack.pop();
   return state;
-}
+};
 
 module.exports = {
   initState,

@@ -10,7 +10,7 @@ const SystemUtils = require('./systemUtils');
 const getRandomInt = max => Math.floor(Math.random() * Math.floor(max));
 
 
-const fd = fs.openSync('tetris.rom', 'r');
+const fd = fs.openSync('maze.rom', 'r');
 
 SystemUtils.initState();
 
@@ -22,7 +22,7 @@ const keyPressed = [null, true];
 
 /* Emulator inits */
 KeyUtils.handleKeyPress(keyPressed);
-const canvas = DrawUtils.init();
+let canvas = DrawUtils.init();
 DrawUtils.draw(canvas);
 const rawRom = fs.readFileSync(fd);
 const romData = RomUtils.fillRomWithSpirtes(
@@ -43,7 +43,7 @@ const loop = async () => {
   const instL = romData[state.programCounter + 1];
   const inst = instH.concat(instL);
 
-  log('Instruction:', inst);
+  log('\nInstruction:', inst);
 
   switch (inst[0]) {
     case 'a':
@@ -56,7 +56,7 @@ const loop = async () => {
         const vIdx = parseInt(inst[1], 16);
         const kk = parseInt(inst.slice(2, 4), 16);
         const rand = getRandomInt(255);
-        console.log('RAND', rand);
+        log('RAND', rand);
         state.V[vIdx] = rand & kk;
       }
       state.programCounter += 2;
@@ -68,16 +68,19 @@ const loop = async () => {
         state.V[0xF] = 0; // Reset VF to 0
         const n = parseInt(inst[3], 16); // read for n-bytes starting from register I
         for (let i = 0; i < n; i++) {
-          const sevenPixelInfo = parseInt(romData[state.I + i], 16).toString(2);
-          for (let ii = 0; ii < 8; ii += 1) {
-            const x = (vX + ii) & 0x3F;
+          const eightPixelInfo = parseInt(romData[state.I + i], 16).toString(2).padStart(8, 0);
+          for (let ii = 0; ii < 8; ii++) {
             const y = (vY + i) & 0x1F;
+            const x = (vX + ii) & 0x3F;
             const newPixel = canvas[y][x];
-
-            if (newPixel && sevenPixelInfo[ii]) { state.V[0xF] = 1; }
-            canvas[y][x] = (newPixel != sevenPixelInfo[ii]);
+            const incPix = parseInt(eightPixelInfo[ii], 2);
+            if (canvas[y][x] && incPix) {
+              error(canvas[y][x], incPix, eightPixelInfo[ii]);
+              state.V[0xF] = 1;
+            }
+            canvas[y][x] = (newPixel != incPix);
           }
-          console.log('7 Pixel', sevenPixelInfo, parseInt(romData[state.I + i], 16), romData[state.I + i]);
+          log('8 Pixel', eightPixelInfo, parseInt(romData[state.I + i], 16), romData[state.I + i]);
         }
         DrawUtils.draw(canvas);
         log('DRAW DATA: (Vx, Vy, n)', vX, vY, n);
@@ -131,7 +134,14 @@ const loop = async () => {
             {
               const vIdx = parseInt(inst[1], 16);
               state.DT = state.V[vIdx] & 0xFF;
-              log('SET: DT = V[vIdx]', state.I, state.V[vIdx], vIdx);
+              log('SET: DT = V[vIdx]', state.V[vIdx], vIdx);
+            }
+            break;
+          case '29':
+            {
+              const vIdx = parseInt(inst[1], 16);
+              state.I = state.V[vIdx] * 5;
+              log('SET hex font begin loc to I: ', vIdx);
             }
             break;
           case '33':
@@ -156,6 +166,15 @@ const loop = async () => {
               log('MEM DUMP TO: I', state.V, romData.slice(state.I, vEnd));
             }
             break;
+          case '65': // MEM LOAD
+            {
+              const vEnd = parseInt(inst[1], 16);
+              for (let i = 0; i < vEnd; i++) {
+                state.V[i] = romData[state.I + i];
+              }
+              log('MEM LOAD from: I', state.V, romData.slice(state.I, vEnd));
+            }
+            break;
           default:
             error('\n\nUnhandled instruction on f inst', inst, LL);
             throw new Error();
@@ -164,14 +183,22 @@ const loop = async () => {
       state.programCounter += 2;
       break;
     case '0':
-      if (inst === '00ee') { // RETURN
-        state = SystemUtils.popState(state);
-        state.programCounter += 2;
-        log('RETN FUNC');
-        break;
+
+      switch (inst) { // RETURN
+        case '00ee':
+          state = SystemUtils.popState(state);
+          log('RETN FUNC');
+          break;
+        case '00e0': // CLS
+          canvas = DrawUtils.init();
+          log('CLS');
+          break;
+        default:
+          error('\n\nUnhandled instruction on for 0', inst);
+          throw new Error();
       }
-      error('\n\n Unhandled sub-instruction', inst);
-      throw new Error();
+      state.programCounter += 2;
+      break;
     case '1': // JUMP
       state.programCounter = parseInt(inst.slice(1), 16);
       log('JUMP', state.programCounter);
@@ -185,8 +212,9 @@ const loop = async () => {
       {
         const vIdx = parseInt(inst[1], 16);
         const kk = parseInt(inst.slice(2, 4), 16);
-        log('\nBE command. V:', vIdx, state.V, '\nTest if', state.V[vIdx], '===', kk);
+        log('SE command. V:', vIdx, state.V, '\nTest if', state.V[vIdx], '===', kk);
         if (state.V[vIdx] === kk) {
+          log('SE SHOULD SKIP');
           state.programCounter += 2; // skip next
         }
         state.programCounter += 2;
@@ -196,8 +224,9 @@ const loop = async () => {
       {
         const vIdx = parseInt(inst[1], 16);
         const kk = parseInt(inst.slice(2, 4), 16);
-        log('\nBNE command. V:', vIdx, state.V, '\nTest if', state.V[vIdx], '!==', kk);
+        log('SNE command. V:', vIdx, state.V, '\nTest if', state.V[vIdx], '!==', kk);
         if (state.V[vIdx] !== kk) {
+          log('SNE SHOULD SKIP');
           state.programCounter += 2; // skip next
         }
         state.programCounter += 2;
@@ -206,16 +235,20 @@ const loop = async () => {
     case '6':
       {
         const vIdx = parseInt(inst[1], 16);
-        state.V[vIdx] = parseInt(inst.slice(2, 4), 16);
-        log('Set V', vIdx, 'to', parseInt(inst.slice(2, 4), 16));
+        const kk = parseInt(inst.slice(2, 4), 16);
+        state.V[vIdx] = kk;
+        log('Set V', vIdx, 'to', kk);
+        log('V:', state.V);
         state.programCounter += 2;
       }
       break;
     case '7':
       {
         const vIdx = parseInt(inst[1], 16);
-        state.V[vIdx] = (state.V[vIdx] + parseInt(inst.slice(2, 4), 16)) & 0xFF;
-        log('Add V', vIdx, 'by', parseInt(inst.slice(2, 4), 16));
+        const kk = parseInt(inst.slice(2, 4), 16);
+        state.V[vIdx] = (state.V[vIdx] + kk) & 0xFF;
+        log('ADD V', vIdx, 'by', kk, state.V[vIdx]);
+        log('V:', state.V);
         state.programCounter += 2;
       }
       break;
@@ -229,7 +262,15 @@ const loop = async () => {
               const Vy = parseInt(inst[2], 16);
               state.V[Vx] = state.V[Vy];
               log('SET Vx = Vy', Vx, Vy, state.V[parseInt(inst[1], 16)], 'to ', state.V[parseInt(inst[2], 16)]);
-              state.programCounter += 2;
+            }
+            break;
+          case '2': // bitwise compare Vx = Vx & Vy
+            {
+              const Vx = parseInt(inst[1], 16);
+              const Vy = parseInt(inst[2], 16);
+              state.V[Vx] &= state.V[Vy];
+              log('V:', state.V);
+              log('SET Vx = Vx & Vy', Vx, Vy, state.V[Vx], state.V[Vy]);
             }
             break;
           default:
@@ -237,6 +278,7 @@ const loop = async () => {
             throw new Error();
         }
       }
+      state.programCounter += 2;
       break;
 
     default:
