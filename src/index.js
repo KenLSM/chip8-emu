@@ -10,7 +10,7 @@ const SystemUtils = require('./systemUtils');
 const getRandomInt = max => Math.floor(Math.random() * Math.floor(max));
 
 
-const fd = fs.openSync('maze.rom', 'r');
+const fd = fs.openSync('spaceinv.rom', 'r');
 
 SystemUtils.initState();
 
